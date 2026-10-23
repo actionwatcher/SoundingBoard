@@ -91,7 +91,9 @@ def load_qwen(device):
             return np.asarray(wavs[0]), sr
         voice = f"clone:{Path(args.ref).name}"
     else:
-        speaker = args.qwen_speaker or model.get_supported_speakers()[0]
+        # The ggml backend lists speakers itself; the torch backend keeps them on the inner model
+        speakers = (model if hasattr(model, "get_supported_speakers") else model.model).get_supported_speakers()
+        speaker = args.qwen_speaker or speakers[0]
 
         def generate(text, lang):
             wavs, sr = model.generate_custom_voice(text, speaker, QWEN_LANG[lang])

@@ -50,7 +50,7 @@ Pin to these versions if a newer release breaks something.
 
 ```bash
 conda create -y -n sound -c conda-forge --override-channels python=3.13 \
-    numpy scipy librosa soundfile soxr scikit-learn numba matplotlib ffmpeg
+    numpy scipy librosa pysoundfile soxr scikit-learn numba matplotlib ffmpeg
 conda install -y -n sound -c conda-forge --override-channels pytorch torchaudio
 
 P=$(conda run -n sound which pip)
@@ -74,10 +74,19 @@ Same as macOS, but install a CUDA build of PyTorch from conda-forge:
 
 ```bash
 conda create -y -n sound -c conda-forge --override-channels python=3.13 \
-    numpy scipy librosa soundfile soxr scikit-learn numba matplotlib ffmpeg
-conda install -y -n sound -c conda-forge --override-channels "pytorch=*=cuda*" torchaudio
+    numpy scipy librosa pysoundfile soxr scikit-learn numba matplotlib ffmpeg
+conda install -y -n sound -c conda-forge --override-channels \
+    "pytorch=2.13.0=cuda130_generic*" "torchaudio=2.11.0=cuda130*" "libblas=*=*openblas"
 # then the same three pip commands as macOS
 ```
+
+- **Pin the CUDA build of both packages to the same CUDA version.** With just `"pytorch=*=cuda*" torchaudio`,
+  conda picks pytorch built for CUDA 13.4 and torchaudio built for CUDA 13.0 (no cuda134 torchaudio exists yet).
+  `import torchaudio` then fails with `PyTorch and TorchAudio were compiled with different CUDA versions`.
+  Check with `conda list -n sound "^(pytorch|torchaudio)$"`: both build strings must start with the same `cudaNNN`.
+- **Use the `generic` build, not `mkl`.** The `cuda130_mkl` pytorch build switches `libblas` to MKL, and numpy
+  then aborts with `Intel oneMKL FATAL ERROR: Cannot load libmkl_gf_lp64.so.3`. The `generic` build plus
+  `libblas=*=*openblas` keeps the OpenBLAS stack.
 
 - Check: `python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name())"`.
 - `qwentts-cpp-python` is not installed on Linux (it is macOS arm64 only unless the `[ggml]` extra is used),
@@ -86,6 +95,19 @@ conda install -y -n sound -c conda-forge --override-channels "pytorch=*=cuda*" t
   `dtype="float16"` (the default in `bench_tts.py`) and `attn_implementation="sdpa"`. If output is
   silent or noisy, use `float32`. Do not install `flash-attn`.
 - The pip torch wheel on Linux may not hit the libomp clash, but stick to conda-forge torch for consistency.
+- **Qwen fails to load on Linux** with `AttributeError: 'MimiConfig' object has no attribute 'rope_theta'`.
+  This is a bug in `qwen-tts-hf` 0.1.1.post1 (the only release), pulled in by `faster-qwen3-tts`. Its
+  `qwen_tts/_transformers_compat.py` registers a global `"default"` RoPE initializer that reads `config.rope_theta`.
+  Transformers 5.x applies the global registry over Mimi's own initializer, and Mimi's config keeps the value in
+  `config.rope_parameters["rope_theta"]`. macOS is not affected (Qwen runs on the ggml backend there).
+  Workaround: in `_default_rope_parameters`, change `base = config.rope_theta` to
+  `base = getattr(config, "rope_theta", None) or config.rope_parameters["rope_theta"]`.
+  A pip reinstall of `qwen-tts-hf` reverts it.
+- `sox` is not installed by these steps; `qwen_tts` prints `SoX could not be found!` on import. This is only a warning.
+
+Known-good on Linux (kernel 6.8, glibc 2.35, RTX 2080 Ti, driver 595, 2026-10-22): python 3.13.17,
+pytorch 2.13.0 `cuda130_generic`, torchaudio 2.11.0 `cuda130`, libblas `openblas`; pip packages as in the table above.
+`bench_tts.py -n 1`: Qwen 1.7B CustomVoice (float16) RTF ~0.43, ~4.6 GB GPU; Chatterbox RTF ~0.85, ~3.3 GB GPU.
 
 ## Steps: PC (Windows)
 
